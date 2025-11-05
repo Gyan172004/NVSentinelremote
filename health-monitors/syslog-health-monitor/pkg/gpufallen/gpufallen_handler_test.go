@@ -93,7 +93,7 @@ func TestProcessLine(t *testing.T) {
 		name          string
 		message       string
 		expectEvent   bool
-		validateEvent func(t *testing.T, events *pb.HealthEvents)
+		validateEvent func(t *testing.T, events *pb.HealthEvents, message string)
 	}{
 		{
 			name: "GPU Fallen Error with PCI ID",
@@ -101,10 +101,9 @@ func TestProcessLine(t *testing.T) {
 				"               NVRM: (PCI ID: 10de:26b5) installed in this system has\n" +
 				"               NVRM: fallen off the bus and is not responding to commands.",
 			expectEvent: true,
-			validateEvent: func(t *testing.T, events *pb.HealthEvents) {
+			validateEvent: func(t *testing.T, events *pb.HealthEvents, message string) {
 				require.NotNil(t, events)
 				require.Len(t, events.Events, 1)
-
 				event := events.Events[0]
 				assert.Equal(t, "test-agent", event.Agent)
 				assert.Equal(t, "test-check", event.CheckName)
@@ -112,12 +111,11 @@ func TestProcessLine(t *testing.T) {
 				assert.True(t, event.IsFatal)
 				assert.False(t, event.IsHealthy)
 				assert.Equal(t, pb.RecommendedAction_RESTART_BM, event.RecommendedAction)
-				assert.Contains(t, event.ErrorCode, "GPU_FALLEN_OFF_BUS")
-
-				// Should have PCI and PCI_ID entities only
+				require.Len(t, event.ErrorCode, 1)
+				assert.Equal(t, "GPU_FALLEN_OFF_BUS", event.ErrorCode[0])
+				assert.Equal(t, message, event.Message)
 				assert.Len(t, event.EntitiesImpacted, 2)
 
-				// Find entities by type rather than assuming order
 				var hasPCI, hasPCIID bool
 				for _, entity := range event.EntitiesImpacted {
 					switch entity.EntityType {
@@ -139,13 +137,11 @@ func TestProcessLine(t *testing.T) {
 				"               NVRM: installed in this system has\n" +
 				"               NVRM: fallen off the bus and is not responding to commands.",
 			expectEvent: true,
-			validateEvent: func(t *testing.T, events *pb.HealthEvents) {
+			validateEvent: func(t *testing.T, events *pb.HealthEvents, message string) {
 				require.NotNil(t, events)
 				require.Len(t, events.Events, 1)
-
 				event := events.Events[0]
-
-				// Should have only PCI entity
+				assert.Equal(t, message, event.Message)
 				assert.Len(t, event.EntitiesImpacted, 1)
 				assert.Equal(t, "PCI", event.EntitiesImpacted[0].EntityType)
 				assert.Equal(t, "0000:b3:00.0", event.EntitiesImpacted[0].EntityValue)
@@ -172,11 +168,11 @@ func TestProcessLine(t *testing.T) {
 			events, err := handler.ProcessLine(tc.message)
 			require.NoError(t, err)
 
-			if tc.expectEvent {
-				require.NotNil(t, events, "Expected an event to be generated")
-				if tc.validateEvent != nil {
-					tc.validateEvent(t, events)
-				}
+		if tc.expectEvent {
+			require.NotNil(t, events, "Expected an event to be generated")
+			if tc.validateEvent != nil {
+				tc.validateEvent(t, events, tc.message)
+			}
 			} else {
 				assert.Nil(t, events, "Expected no event to be generated")
 			}
@@ -296,11 +292,10 @@ func TestXIDTracking(t *testing.T) {
 			"test-check",
 		)
 		require.NoError(t, err)
-		defer handler5.Close()
+	defer handler5.Close()
 
-		// Message contains both XID and "fallen off the bus"
-		combinedMsg := "NVRM: Xid (PCI:0000:b3:00.0): 79, GPU has fallen off the bus and is not responding to commands."
-		events, err := handler5.ProcessLine(combinedMsg)
+	combinedMsg := "NVRM: Xid (PCI:0000:b3:00.0): 79, GPU has fallen off the bus and is not responding to commands."
+	events, err := handler5.ProcessLine(combinedMsg)
 		require.NoError(t, err)
 		assert.Nil(t, events, "Should not generate event when XID is in same message - let XID handler process it")
 	})
@@ -312,22 +307,19 @@ func TestXIDTracking(t *testing.T) {
 			"GPU",
 			"test-check",
 		)
-		require.NoError(t, err)
-		defer handler6.Close()
+	require.NoError(t, err)
+	defer handler6.Close()
 
-		// Process message with malformed XID code (not a number)
-		// This should log a warning but not panic or corrupt state
-		malformedXIDMsg := "NVRM: Xid (PCI:0000:b3:00.0): INVALID, pid=1234, name=process"
-		events, err := handler6.ProcessLine(malformedXIDMsg)
-		require.NoError(t, err)
-		assert.Nil(t, events, "Should not generate event for malformed XID")
+	malformedXIDMsg := "NVRM: Xid (PCI:0000:b3:00.0): INVALID, pid=1234, name=process"
+	events, err := handler6.ProcessLine(malformedXIDMsg)
+	require.NoError(t, err)
+	assert.Nil(t, events)
 
-		// Now process GPU fallen off message - should generate event since malformed XID wasn't recorded
-		fallenMsg := "NVRM: The NVIDIA GPU 0000:b3:00.0 fallen off the bus and is not responding to commands."
-		events, err = handler6.ProcessLine(fallenMsg)
-		require.NoError(t, err)
-		require.NotNil(t, events, "Should generate event since malformed XID wasn't recorded")
-		assert.Len(t, events.Events, 1)
+	fallenMsg := "NVRM: The NVIDIA GPU 0000:b3:00.0 fallen off the bus and is not responding to commands."
+	events, err = handler6.ProcessLine(fallenMsg)
+	require.NoError(t, err)
+	require.NotNil(t, events)
+	assert.Len(t, events.Events, 1)
 	})
 
 	t.Run("Expired entries are cleaned up from map", func(t *testing.T) {
