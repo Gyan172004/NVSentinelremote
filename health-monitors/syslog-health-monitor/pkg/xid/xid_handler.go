@@ -142,6 +142,7 @@ func (xidHandler *XIDHandler) createHealthEventFromResponse(xidResp *parser.Resp
 		NodeName:           xidHandler.nodeName,
 		RecommendedAction:  recommendedAction,
 		ErrorCode:          []string{xidResp.Result.DecodedXIDStr},
+		Metadata:           map[string]string{},
 	}
 
 	return &pb.HealthEvents{
