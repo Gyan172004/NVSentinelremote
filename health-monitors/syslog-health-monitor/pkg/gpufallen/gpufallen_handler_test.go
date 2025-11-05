@@ -168,11 +168,11 @@ func TestProcessLine(t *testing.T) {
 			events, err := handler.ProcessLine(tc.message)
 			require.NoError(t, err)
 
-		if tc.expectEvent {
-			require.NotNil(t, events, "Expected an event to be generated")
-			if tc.validateEvent != nil {
-				tc.validateEvent(t, events, tc.message)
-			}
+			if tc.expectEvent {
+				require.NotNil(t, events, "Expected an event to be generated")
+				if tc.validateEvent != nil {
+					tc.validateEvent(t, events, tc.message)
+				}
 			} else {
 				assert.Nil(t, events, "Expected no event to be generated")
 			}
@@ -292,10 +292,10 @@ func TestXIDTracking(t *testing.T) {
 			"test-check",
 		)
 		require.NoError(t, err)
-	defer handler5.Close()
+		defer handler5.Close()
 
-	combinedMsg := "NVRM: Xid (PCI:0000:b3:00.0): 79, GPU has fallen off the bus and is not responding to commands."
-	events, err := handler5.ProcessLine(combinedMsg)
+		combinedMsg := "NVRM: Xid (PCI:0000:b3:00.0): 79, GPU has fallen off the bus and is not responding to commands."
+		events, err := handler5.ProcessLine(combinedMsg)
 		require.NoError(t, err)
 		assert.Nil(t, events, "Should not generate event when XID is in same message - let XID handler process it")
 	})
@@ -307,19 +307,19 @@ func TestXIDTracking(t *testing.T) {
 			"GPU",
 			"test-check",
 		)
-	require.NoError(t, err)
-	defer handler6.Close()
+		require.NoError(t, err)
+		defer handler6.Close()
 
-	malformedXIDMsg := "NVRM: Xid (PCI:0000:b3:00.0): INVALID, pid=1234, name=process"
-	events, err := handler6.ProcessLine(malformedXIDMsg)
-	require.NoError(t, err)
-	assert.Nil(t, events)
+		malformedXIDMsg := "NVRM: Xid (PCI:0000:b3:00.0): INVALID, pid=1234, name=process"
+		events, err := handler6.ProcessLine(malformedXIDMsg)
+		require.NoError(t, err)
+		assert.Nil(t, events)
 
-	fallenMsg := "NVRM: The NVIDIA GPU 0000:b3:00.0 fallen off the bus and is not responding to commands."
-	events, err = handler6.ProcessLine(fallenMsg)
-	require.NoError(t, err)
-	require.NotNil(t, events)
-	assert.Len(t, events.Events, 1)
+		fallenMsg := "NVRM: The NVIDIA GPU 0000:b3:00.0 fallen off the bus and is not responding to commands."
+		events, err = handler6.ProcessLine(fallenMsg)
+		require.NoError(t, err)
+		require.NotNil(t, events)
+		assert.Len(t, events.Events, 1)
 	})
 
 	t.Run("Expired entries are cleaned up from map", func(t *testing.T) {
