@@ -19,7 +19,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+<<<<<<< HEAD
 	"strings"
+=======
+	"sort"
+>>>>>>> b503038 (fix: ensure deterministic pod event messages)
 	"sync"
 	"time"
 
@@ -391,6 +395,8 @@ func (r *Reconciler) executeCheckCompletion(ctx context.Context,
 	}
 
 	if !allPodsComplete {
+		sort.Strings(remainingPods)
+
 		message := fmt.Sprintf("Waiting for following pods to finish: %v", remainingPods)
 		reason := "AwaitingPodCompletion"
 
