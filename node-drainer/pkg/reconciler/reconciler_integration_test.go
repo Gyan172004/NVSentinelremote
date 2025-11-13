@@ -1038,6 +1038,7 @@ func getHistogramCount(t *testing.T, histogram prometheus.Histogram) uint64 {
 	return metric.Histogram.GetSampleCount()
 }
 
+<<<<<<< HEAD
 // TestReconciler_CancelledEventWithOngoingDrain validates that Cancelled events stop ongoing drain operations
 func TestReconciler_CancelledEventWithOngoingDrain(t *testing.T) {
 	setup := setupRequeueTest(t, []config.UserNamespace{
@@ -1196,4 +1197,63 @@ func TestReconciler_MultipleEventsOnNodeCancelledByUnQuarantine(t *testing.T) {
 	pod2, err := setup.client.CoreV1().Pods("timeout-test").Get(setup.ctx, "pod-2", metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Nil(t, pod2.DeletionTimestamp, "pod-2 should not be deleted")
+}
+
+// TestReconciler_PodListSortingConsistentEvents verifies that pod list sorting prevents duplicate Kubernetes events by ensuring consistent event messages across multiple reconciliation calls.
+func TestReconciler_PodListSortingConsistentEvents(t *testing.T) {
+	setup := setupDirectTest(t, []config.UserNamespace{
+		{Name: "test-*", Mode: config.ModeAllowCompletion},
+	}, false)
+
+	nodeName := "test-node-sorting"
+	createNode(setup.ctx, t, setup.client, nodeName)
+	createNamespace(setup.ctx, t, setup.client, "test-sorting")
+
+	for _, podName := range []string{"ubuntu-gpu-deployment-64c54f5b4c-2c4c5", "alloy-metrics-55d6fbdbd-vrp2h", "alloy-gateway-0"} {
+		createPod(setup.ctx, t, setup.client, "test-sorting", podName, nodeName, v1.PodRunning)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	const numIterations = 10
+	eventMessages := make([]string, 0, numIterations)
+
+	for i := 0; i < numIterations; i++ {
+		setup.client.CoreV1().Events(metav1.NamespaceDefault).DeleteCollection(
+			setup.ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
+
+		time.Sleep(100 * time.Millisecond)
+
+		err := processHealthEvent(setup.ctx, t, setup.reconciler, setup.mockCollection, healthEventOptions{
+			nodeName:        nodeName,
+			nodeQuarantined: model.Quarantined,
+		})
+
+		assert.Error(t, err)
+		time.Sleep(200 * time.Millisecond)
+
+		events, err := setup.client.CoreV1().Events(metav1.NamespaceDefault).List(
+			setup.ctx,
+			metav1.ListOptions{
+				FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Node", nodeName),
+			},
+		)
+		require.NoError(t, err)
+
+		if len(events.Items) > 0 {
+			eventMessages = append(eventMessages, events.Items[len(events.Items)-1].Message)
+		}
+	}
+
+	require.Greater(t, len(eventMessages), 0)
+
+	referenceMessage := eventMessages[0]
+	for i, msg := range eventMessages {
+		assert.Equal(t, referenceMessage, msg,
+			"FAIL: Iteration %d different message. sort.Strings() missing from reconciler.go:252", i)
+	}
+
+	expectedMessage := "Waiting for following pods to finish: [test-sorting/alloy-gateway-0 test-sorting/alloy-metrics-55d6fbdbd-vrp2h test-sorting/ubuntu-gpu-deployment-64c54f5b4c-2c4c5]"
+	assert.Equal(t, expectedMessage, referenceMessage, "FAIL: Pods not in sorted order")
+>>>>>>> eca3677 (Add integration test for pod list sorting consistency)
 }
