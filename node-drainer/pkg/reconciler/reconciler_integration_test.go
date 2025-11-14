@@ -1075,17 +1075,16 @@ func TestReconciler_PodListSortingConsistentEvents(t *testing.T) {
 		// Wait for new event to be created with the pod list
 		var currentMessage string
 		require.Eventually(t, func() bool {
-		events, err := setup.client.CoreV1().Events(metav1.NamespaceDefault).List(
-			setup.ctx,
-			metav1.ListOptions{
-				FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Node", nodeName),
-			},
-		)
+			events, err := setup.client.CoreV1().Events(metav1.NamespaceDefault).List(
+				setup.ctx,
+				metav1.ListOptions{
+					FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Node", nodeName),
+				},
+			)
 			if err != nil || len(events.Items) == 0 {
 				return false
 			}
 			msg := events.Items[len(events.Items)-1].Message
-			// Wait for a message that contains pod information
 			if len(msg) > 0 && msg != "" {
 				currentMessage = msg
 				return true
@@ -1093,25 +1092,21 @@ func TestReconciler_PodListSortingConsistentEvents(t *testing.T) {
 			return false
 		}, 5*time.Second, 50*time.Millisecond, "Event with pod list should be created")
 
-		// Set reference message on first iteration
 		if i == 0 {
 			referenceMessage = currentMessage
 			continue
 		}
 
-		// Compare with reference message
 		if currentMessage != referenceMessage {
 			mismatchFound = true
 			mismatchIteration = i
 			mismatchMessage = currentMessage
-			// Early break on first mismatch
 			break
 		}
 	}
 
 	require.NotEmpty(t, referenceMessage, "No event messages were generated")
 
-	// If mismatch found, report it
 	if mismatchFound {
 		assert.Fail(t, fmt.Sprintf("FAIL: Iteration %d produced different message. sort.Strings() missing from reconciler.go:252\nExpected: %s\nGot: %s",
 			mismatchIteration, referenceMessage, mismatchMessage))
