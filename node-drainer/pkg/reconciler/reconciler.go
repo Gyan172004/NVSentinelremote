@@ -19,11 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-<<<<<<< HEAD
 	"strings"
-=======
 	"sort"
->>>>>>> b503038 (fix: ensure deterministic pod event messages)
 	"sync"
 	"time"
 
