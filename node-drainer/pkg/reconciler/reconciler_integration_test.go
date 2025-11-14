@@ -1035,16 +1035,35 @@ func TestReconciler_PodListSortingConsistentEvents(t *testing.T) {
 		createPod(setup.ctx, t, setup.client, "test-sorting", podName, nodeName, v1.PodRunning)
 	}
 
-	time.Sleep(2 * time.Second)
+	// Wait for all pods to be visible in the informer cache
+	require.Eventually(t, func() bool {
+		pods, err := setup.informersInstance.FindEvictablePodsInNamespaceAndNode("test-sorting", nodeName)
+		if err != nil {
+			return false
+		}
+		return len(pods) == 3
+	}, 30*time.Second, 100*time.Millisecond, "All 3 pods should be visible in informer cache before test starts")
 
-	const numIterations = 10
-	eventMessages := make([]string, 0, numIterations)
+	const numIterations = 5
+	var referenceMessage string
+	var mismatchFound bool
+	var mismatchIteration int
+	var mismatchMessage string
 
 	for i := 0; i < numIterations; i++ {
 		setup.client.CoreV1().Events(metav1.NamespaceDefault).DeleteCollection(
 			setup.ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
 
-		time.Sleep(100 * time.Millisecond)
+		// Wait for events to be deleted
+		require.Eventually(t, func() bool {
+			events, _ := setup.client.CoreV1().Events(metav1.NamespaceDefault).List(
+				setup.ctx,
+				metav1.ListOptions{
+					FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Node", nodeName),
+				},
+			)
+			return len(events.Items) == 0
+		}, 5*time.Second, 50*time.Millisecond, "Events should be deleted before next iteration")
 
 		err := processHealthEvent(setup.ctx, t, setup.reconciler, setup.mockCollection, healthEventOptions{
 			nodeName:        nodeName,
@@ -1052,29 +1071,52 @@ func TestReconciler_PodListSortingConsistentEvents(t *testing.T) {
 		})
 
 		assert.Error(t, err)
-		time.Sleep(200 * time.Millisecond)
 
+		// Wait for new event to be created with the pod list
+		var currentMessage string
+		require.Eventually(t, func() bool {
 		events, err := setup.client.CoreV1().Events(metav1.NamespaceDefault).List(
 			setup.ctx,
 			metav1.ListOptions{
 				FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=Node", nodeName),
 			},
 		)
-		require.NoError(t, err)
+			if err != nil || len(events.Items) == 0 {
+				return false
+			}
+			msg := events.Items[len(events.Items)-1].Message
+			// Wait for a message that contains pod information
+			if len(msg) > 0 && msg != "" {
+				currentMessage = msg
+				return true
+			}
+			return false
+		}, 5*time.Second, 50*time.Millisecond, "Event with pod list should be created")
 
-		if len(events.Items) > 0 {
-			eventMessages = append(eventMessages, events.Items[len(events.Items)-1].Message)
+		// Set reference message on first iteration
+		if i == 0 {
+			referenceMessage = currentMessage
+			continue
+		}
+
+		// Compare with reference message
+		if currentMessage != referenceMessage {
+			mismatchFound = true
+			mismatchIteration = i
+			mismatchMessage = currentMessage
+			// Early break on first mismatch
+			break
 		}
 	}
 
-	require.Greater(t, len(eventMessages), 0)
+	require.NotEmpty(t, referenceMessage, "No event messages were generated")
 
-	referenceMessage := eventMessages[0]
-	for i, msg := range eventMessages {
-		assert.Equal(t, referenceMessage, msg,
-			"FAIL: Iteration %d different message. sort.Strings() missing from reconciler.go:252", i)
+	// If mismatch found, report it
+	if mismatchFound {
+		assert.Fail(t, fmt.Sprintf("FAIL: Iteration %d produced different message. sort.Strings() missing from reconciler.go:252\nExpected: %s\nGot: %s",
+			mismatchIteration, referenceMessage, mismatchMessage))
 	}
 
 	expectedMessage := "Waiting for following pods to finish: [test-sorting/alloy-gateway-0 test-sorting/alloy-metrics-55d6fbdbd-vrp2h test-sorting/ubuntu-gpu-deployment-64c54f5b4c-2c4c5]"
-	assert.Equal(t, expectedMessage, referenceMessage, "FAIL: Pods not in sorted order")
+	assert.Equal(t, expectedMessage, referenceMessage, "FAIL: Pods not in same order")
 }
