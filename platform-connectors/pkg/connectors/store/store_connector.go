@@ -92,7 +92,11 @@ func (r *DatabaseStoreConnector) FetchAndProcessHealthMetric(ctx context.Context
 			slog.Info("Context canceled, exiting health metric processing loop")
 			return
 		default:
-			healthEvents := r.ringBuffer.Dequeue()
+			healthEvents, quit := r.ringBuffer.Dequeue()
+			if quit {
+				slog.Info("Queue signaled shutdown, exiting processing loop")
+				return
+			}
 			if healthEvents == nil || len(healthEvents.GetEvents()) == 0 {
 				continue
 			}
@@ -105,6 +109,14 @@ func (r *DatabaseStoreConnector) FetchAndProcessHealthMetric(ctx context.Context
 				r.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
 			}
 		}
+	}
+}
+
+func (r *DatabaseStoreConnector) ShutdownRingBuffer() {
+	if r.ringBuffer != nil {
+		slog.Info("Shutting down database store connector ring buffer with drain")
+		r.ringBuffer.ShutDownHealthMetricQueue()
+		slog.Info("Database store connector ring buffer drained successfully")
 	}
 }
 
