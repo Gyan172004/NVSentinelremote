@@ -197,6 +197,7 @@ func TestRingBuffer_ShutDown(t *testing.T) {
 	if result == nil {
 		t.Errorf("Expected to get the enqueued item, got nil")
 	}
+	ringBuffer.HealthMetricEleProcessingCompleted(result)
 
 	result2, quit2 := ringBuffer.Dequeue()
 	if !quit2 {
