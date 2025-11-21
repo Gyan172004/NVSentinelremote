@@ -97,6 +97,7 @@ func (r *DatabaseStoreConnector) FetchAndProcessHealthMetric(ctx context.Context
 				slog.Info("Queue signaled shutdown, exiting processing loop")
 				return
 			}
+
 			if healthEvents == nil || len(healthEvents.GetEvents()) == 0 {
 				r.ringBuffer.HealthMetricEleProcessingCompleted(healthEvents)
 				continue

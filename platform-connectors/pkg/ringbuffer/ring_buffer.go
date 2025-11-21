@@ -64,6 +64,7 @@ func (rb *RingBuffer) Dequeue() (*protos.HealthEvents, bool) {
 		slog.Info("Context cancelled, signaling quit")
 		rb.healthMetricQueue.Forget(healthEvents)
 		rb.healthMetricQueue.Done(healthEvents)
+
 		return nil, true
 	}
 
