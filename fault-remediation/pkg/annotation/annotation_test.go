@@ -17,7 +17,9 @@ package annotation
 import (
 	"context"
 	"fmt"
+	"sync"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -218,4 +220,100 @@ func TestRemoveGroupFromState(t *testing.T) {
 
 	assert.NotContains(t, state.EquivalenceGroups, removedGroup)
 	assert.Contains(t, state.EquivalenceGroups, notRemovedGroup)
+}
+
+func TestConcurrentRemoveGroupFromState(t *testing.T) {
+	nodeName := "test-node"
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				AnnotationKey: fmt.Sprintf(`{
+				  "equivalenceGroups": {
+					"%s": {"maintenanceCR": "cr-0", "actionName": "action-0"},
+					"%s": {"maintenanceCR": "cr-1", "actionName": "action-1"},
+					"%s": {"maintenanceCR": "cr-2", "actionName": "action-2"},
+					"%s": {"maintenanceCR": "cr-3", "actionName": "action-3"},
+					"%s": {"maintenanceCR": "cr-4", "actionName": "action-4"}
+				  }
+				}`, "group-0", "group-1", "group-2", "group-3", "group-4"),
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().WithObjects(node).Build()
+	annotationManager := NodeAnnotationManager{client: client}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, fmt.Sprintf("group-%d", idx))
+		}(i)
+	}
+	wg.Wait()
+
+	state, _, err := annotationManager.GetRemediationState(context.TODO(), nodeName)
+	require.NoError(t, err)
+
+	assert.Empty(t, state.EquivalenceGroups,
+		"all groups should be removed, but %d survived due to concurrent read-modify-write race",
+		len(state.EquivalenceGroups))
+}
+
+func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
+	nodeName := "test-node"
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				AnnotationKey: `{
+				  "equivalenceGroups": {
+					"existing-group": {"maintenanceCR": "old-cr", "actionName": "RESTART_BM"}
+				  }
+				}`,
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().WithObjects(node).Build()
+	annotationManager := NodeAnnotationManager{client: client}
+
+	const iterations = 100
+	for i := 0; i < iterations; i++ {
+		// Reset state each iteration
+		err := annotationManager.UpdateRemediationState(context.TODO(), nodeName, "existing-group", "old-cr", "RESTART_BM")
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, "existing-group")
+		}()
+
+		go func() {
+			defer wg.Done()
+			_ = annotationManager.UpdateRemediationState(context.TODO(), nodeName, "new-group", "new-cr", "COMPONENT_RESET")
+		}()
+
+		wg.Wait()
+
+		state, _, err := annotationManager.GetRemediationState(context.TODO(), nodeName)
+		require.NoError(t, err)
+
+		_, existingPresent := state.EquivalenceGroups["existing-group"]
+		_, newPresent := state.EquivalenceGroups["new-group"]
+
+		if existingPresent || !newPresent {
+			t.Errorf("race condition on iteration %d: existing-group present=%v, new-group present=%v",
+				i, existingPresent, newPresent)
+			return
+		}
+
+		// Cleanup for next iteration
+		_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, "new-group")
+	}
 }

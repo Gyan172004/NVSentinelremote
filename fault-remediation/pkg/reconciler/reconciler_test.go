@@ -160,6 +160,10 @@ func (m *MockNodeAnnotationManager) RemoveGroupFromState(ctx context.Context, no
 	return nil
 }
 
+func (m *MockNodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeName string, groups []string) error {
+	return nil
+}
+
 func (m *MockDatabaseClient) UpdateDocument(ctx context.Context, filter interface{}, update interface{}) (*client.UpdateResult, error) {
 	if m.updateDocumentFn != nil {
 		return m.updateDocumentFn(ctx, filter, update)
