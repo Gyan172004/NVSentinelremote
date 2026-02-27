@@ -32,6 +32,7 @@ type NodeAnnotationManagerInterface interface {
 	UpdateRemediationState(ctx context.Context, nodeName string, group string, crName string, actionName string) error
 	ClearRemediationState(ctx context.Context, nodeName string) error
 	RemoveGroupFromState(ctx context.Context, nodeName string, group string) error
+	RemoveGroupsFromState(ctx context.Context, nodeName string, groups []string) error
 }
 
 // RemediationStateAnnotation represents the structure of the node annotation
