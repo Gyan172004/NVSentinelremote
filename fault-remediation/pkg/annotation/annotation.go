@@ -84,12 +84,12 @@ func (m *NodeAnnotationManager) GetRemediationState(
 // UpdateRemediationState updates the node annotation with new remediation state
 func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, nodeName string,
 	group string, crName string, actionName string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Get current state
 		state, node, err := m.GetRemediationState(ctx, nodeName)
 		if err != nil {
 			slog.Warn("Failed to get current remediation state", "node", nodeName, "error", err)
-			return fmt.Errorf("failed to get current remediation state: %w", err)
+			return err
 		}
 
 		// Update state for the group
@@ -102,7 +102,7 @@ func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, node
 		// Marshal to JSON
 		stateJSON, err := json.Marshal(state)
 		if err != nil {
-			return fmt.Errorf("failed to marshal remediation state: %w", err)
+			return err
 		}
 
 		updatedNode := node.DeepCopy()
@@ -113,7 +113,7 @@ func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, node
 		updatedNode.Annotations[AnnotationKey] = string(stateJSON)
 
 		if err = m.client.Update(ctx, updatedNode); err != nil {
-			return fmt.Errorf("failed to update node annotation: %w", err)
+			return err
 		}
 
 		slog.Info("Updated remediation state annotation for node",
@@ -123,18 +123,21 @@ func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, node
 
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("failed to update remediation state for node %s: %w", nodeName, err)
+	}
+	return nil
 }
 
 // ClearRemediationState removes the remediation state annotation from a node
 func (m *NodeAnnotationManager) ClearRemediationState(ctx context.Context, nodeName string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		node := &corev1.Node{}
 
-		err := m.client.Get(ctx, types.NamespacedName{
+		if err := m.client.Get(ctx, types.NamespacedName{
 			Name: nodeName,
-		}, node)
-		if err != nil {
-			return fmt.Errorf("failed to get node %s: %w", nodeName, err)
+		}, node); err != nil {
+			return err
 		}
 
 		if node.Annotations == nil {
@@ -144,14 +147,18 @@ func (m *NodeAnnotationManager) ClearRemediationState(ctx context.Context, nodeN
 		updatedNode := node.DeepCopy()
 		delete(updatedNode.Annotations, AnnotationKey)
 
-		if err = m.client.Update(ctx, updatedNode); err != nil {
-			return fmt.Errorf("failed to update node annotation: %w", err)
+		if err := m.client.Update(ctx, updatedNode); err != nil {
+			return err
 		}
 
 		slog.Info("Cleared remediation state annotation for node", "node", nodeName)
 
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("failed to clear remediation state for node %s: %w", nodeName, err)
+	}
+	return nil
 }
 
 // RemoveGroupFromState removes a specific group from the remediation state
@@ -162,13 +169,13 @@ func (m *NodeAnnotationManager) RemoveGroupFromState(ctx context.Context, nodeNa
 // RemoveGroupsFromState removes multiple groups from the remediation state in a single atomic read-modify-write
 // operation. This avoids the race condition that occurs when removing groups one at a time in a loop.
 func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeName string, groups []string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		state, node, err := m.GetRemediationState(ctx, nodeName)
 		if err != nil {
-			return fmt.Errorf("failed to get current remediation state: %w", err)
+			return err
 		}
 
-	// Remove the groups
+		// Remove the groups
 		for _, group := range groups {
 			delete(state.EquivalenceGroups, group)
 		}
@@ -181,7 +188,7 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 			}
 
 			if err = m.client.Update(ctx, updatedNode); err != nil {
-				return fmt.Errorf("failed to update node annotation: %w", err)
+				return err
 			}
 
 			slog.Info("Cleared remediation state annotation for node", "node", nodeName)
@@ -192,7 +199,7 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 		// Marshal to JSON
 		stateJSON, err := json.Marshal(state)
 		if err != nil {
-			return fmt.Errorf("failed to marshal remediation state: %w", err)
+			return err
 		}
 
 		updatedNode := node.DeepCopy()
@@ -203,7 +210,7 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 		updatedNode.Annotations[AnnotationKey] = string(stateJSON)
 
 		if err = m.client.Update(ctx, updatedNode); err != nil {
-			return fmt.Errorf("failed to update node annotation: %w", err)
+			return err
 		}
 
 		for _, group := range groups {
@@ -212,4 +219,8 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("failed to remove groups from remediation state for node %s: %w", nodeName, err)
+	}
+	return nil
 }
