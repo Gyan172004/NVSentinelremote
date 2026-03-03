@@ -26,9 +26,21 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// conflictBackoff is a custom retry backoff for annotation read-modify-write
+// operations under concurrent access. The default retry (5 steps, 10ms, no
+// exponential increase) is insufficient when multiple goroutines update the
+// same node's annotations concurrently.
+var conflictBackoff = wait.Backoff{
+	Steps:    10,
+	Duration: 20 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0.1,
+}
 
 // NodeAnnotationManager manages node annotations for tracking remediation state.
 type NodeAnnotationManager struct {
@@ -84,7 +96,7 @@ func (m *NodeAnnotationManager) GetRemediationState(
 // UpdateRemediationState updates the node annotation with new remediation state
 func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, nodeName string,
 	group string, crName string, actionName string) error {
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(conflictBackoff, func() error {
 		// Get current state
 		state, node, err := m.GetRemediationState(ctx, nodeName)
 		if err != nil {
@@ -126,12 +138,13 @@ func (m *NodeAnnotationManager) UpdateRemediationState(ctx context.Context, node
 	if err != nil {
 		return fmt.Errorf("failed to update remediation state for node %s: %w", nodeName, err)
 	}
+
 	return nil
 }
 
 // ClearRemediationState removes the remediation state annotation from a node
 func (m *NodeAnnotationManager) ClearRemediationState(ctx context.Context, nodeName string) error {
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(conflictBackoff, func() error {
 		node := &corev1.Node{}
 
 		if err := m.client.Get(ctx, types.NamespacedName{
@@ -158,18 +171,14 @@ func (m *NodeAnnotationManager) ClearRemediationState(ctx context.Context, nodeN
 	if err != nil {
 		return fmt.Errorf("failed to clear remediation state for node %s: %w", nodeName, err)
 	}
-	return nil
-}
 
-// RemoveGroupFromState removes a specific group from the remediation state
-func (m *NodeAnnotationManager) RemoveGroupFromState(ctx context.Context, nodeName string, group string) error {
-	return m.RemoveGroupsFromState(ctx, nodeName, []string{group})
+	return nil
 }
 
 // RemoveGroupsFromState removes multiple groups from the remediation state in a single atomic read-modify-write
 // operation. This avoids the race condition that occurs when removing groups one at a time in a loop.
 func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeName string, groups []string) error {
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(conflictBackoff, func() error {
 		state, node, err := m.GetRemediationState(ctx, nodeName)
 		if err != nil {
 			return err
@@ -196,7 +205,6 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 			return nil
 		}
 
-		// Marshal to JSON
 		stateJSON, err := json.Marshal(state)
 		if err != nil {
 			return err
@@ -213,14 +221,13 @@ func (m *NodeAnnotationManager) RemoveGroupsFromState(ctx context.Context, nodeN
 			return err
 		}
 
-		for _, group := range groups {
-			slog.Info("Removed group from remediation state for node", "node", nodeName, "group", group)
-		}
+		slog.Info("Removed groups from remediation state for node", "node", nodeName, "groups", groups)
 
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove groups from remediation state for node %s: %w", nodeName, err)
 	}
+
 	return nil
 }

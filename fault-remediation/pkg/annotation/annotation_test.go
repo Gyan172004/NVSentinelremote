@@ -186,8 +186,9 @@ func TestClearRemediationState(t *testing.T) {
 	assert.NotContains(t, node.Annotations, AnnotationKey)
 }
 
-func TestRemoveGroupFromState(t *testing.T) {
-	removedGroup := "gpu-timeout"
+func TestRemoveGroupsFromState(t *testing.T) {
+	removedGroup1 := "gpu-timeout"
+	removedGroup2 := "component-reset"
 	notRemovedGroup := "node-reboot"
 	nodeName := "node"
 	node := &corev1.Node{
@@ -200,10 +201,13 @@ func TestRemoveGroupFromState(t *testing.T) {
 					  "maintenanceCR": "gpu-maintenance-abc123"
 					},
 					"%s": {
+					  "maintenanceCR": "component-reset-cr-456"
+					},
+					"%s": {
 					  "maintenanceCR": "node-reboot-cr-789"
 					}
 				  }
-				}`, removedGroup, notRemovedGroup),
+				}`, removedGroup1, removedGroup2, notRemovedGroup),
 			},
 		},
 	}
@@ -212,17 +216,18 @@ func TestRemoveGroupFromState(t *testing.T) {
 	annotationManager := NodeAnnotationManager{
 		client: client,
 	}
-	err := annotationManager.RemoveGroupFromState(context.TODO(), nodeName, removedGroup)
+	err := annotationManager.RemoveGroupsFromState(context.TODO(), nodeName, []string{removedGroup1, removedGroup2})
 	assert.NoError(t, err)
 
 	state, _, err := annotationManager.GetRemediationState(context.TODO(), nodeName)
 	assert.NoError(t, err)
 
-	assert.NotContains(t, state.EquivalenceGroups, removedGroup)
+	assert.NotContains(t, state.EquivalenceGroups, removedGroup1)
+	assert.NotContains(t, state.EquivalenceGroups, removedGroup2)
 	assert.Contains(t, state.EquivalenceGroups, notRemovedGroup)
 }
 
-func TestConcurrentRemoveGroupFromState(t *testing.T) {
+func TestConcurrentRemoveGroupsFromState(t *testing.T) {
 	nodeName := "test-node"
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -234,9 +239,10 @@ func TestConcurrentRemoveGroupFromState(t *testing.T) {
 					"%s": {"maintenanceCR": "cr-1", "actionName": "action-1"},
 					"%s": {"maintenanceCR": "cr-2", "actionName": "action-2"},
 					"%s": {"maintenanceCR": "cr-3", "actionName": "action-3"},
-					"%s": {"maintenanceCR": "cr-4", "actionName": "action-4"}
+					"%s": {"maintenanceCR": "cr-4", "actionName": "action-4"},
+					"%s": {"maintenanceCR": "cr-5", "actionName": "action-5"}
 				  }
-				}`, "group-0", "group-1", "group-2", "group-3", "group-4"),
+				}`, "group-0", "group-1", "group-2", "group-3", "group-4", "group-5"),
 			},
 		},
 	}
@@ -245,11 +251,11 @@ func TestConcurrentRemoveGroupFromState(t *testing.T) {
 	annotationManager := NodeAnnotationManager{client: client}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i += 2 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, fmt.Sprintf("group-%d", idx))
+			_ = annotationManager.RemoveGroupsFromState(context.TODO(), nodeName, []string{fmt.Sprintf("group-%d", idx), fmt.Sprintf("group-%d", idx+1)})
 		}(i)
 	}
 	wg.Wait()
@@ -262,7 +268,7 @@ func TestConcurrentRemoveGroupFromState(t *testing.T) {
 		len(state.EquivalenceGroups))
 }
 
-func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
+func TestConcurrentUpdateAndRemoveGroupsFromState(t *testing.T) {
 	nodeName := "test-node"
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -270,7 +276,8 @@ func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
 			Annotations: map[string]string{
 				AnnotationKey: `{
 				  "equivalenceGroups": {
-					"existing-group": {"maintenanceCR": "old-cr", "actionName": "RESTART_BM"}
+					"existing-group-1": {"maintenanceCR": "old-cr-1", "actionName": "RESTART_BM"},
+					"existing-group-2": {"maintenanceCR": "old-cr-2", "actionName": "COMPONENT_RESET"}
 				  }
 				}`,
 			},
@@ -283,7 +290,9 @@ func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
 	const iterations = 100
 	for i := 0; i < iterations; i++ {
 		// Reset state each iteration
-		err := annotationManager.UpdateRemediationState(context.TODO(), nodeName, "existing-group", "old-cr", "RESTART_BM")
+		err := annotationManager.UpdateRemediationState(context.TODO(), nodeName, "existing-group-1", "old-cr-1", "RESTART_BM")
+		require.NoError(t, err)
+		err = annotationManager.UpdateRemediationState(context.TODO(), nodeName, "existing-group-2", "old-cr-2", "COMPONENT_RESET")
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
@@ -291,7 +300,7 @@ func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, "existing-group")
+			_ = annotationManager.RemoveGroupsFromState(context.TODO(), nodeName, []string{"existing-group-1", "existing-group-2"})
 		}()
 
 		go func() {
@@ -304,16 +313,17 @@ func TestConcurrentUpdateAndRemoveGroupFromState(t *testing.T) {
 		state, _, err := annotationManager.GetRemediationState(context.TODO(), nodeName)
 		require.NoError(t, err)
 
-		_, existingPresent := state.EquivalenceGroups["existing-group"]
+		_, existing1Present := state.EquivalenceGroups["existing-group-1"]
+		_, existing2Present := state.EquivalenceGroups["existing-group-2"]
 		_, newPresent := state.EquivalenceGroups["new-group"]
 
-		if existingPresent || !newPresent {
-			t.Errorf("race condition on iteration %d: existing-group present=%v, new-group present=%v",
-				i, existingPresent, newPresent)
+		if existing1Present || existing2Present || !newPresent {
+			t.Errorf("race condition on iteration %d: existing-group-1 present=%v, existing-group-2 present=%v, new-group present=%v",
+				i, existing1Present, existing2Present, newPresent)
 			return
 		}
 
 		// Cleanup for next iteration
-		_ = annotationManager.RemoveGroupFromState(context.TODO(), nodeName, "new-group")
+		_ = annotationManager.RemoveGroupsFromState(context.TODO(), nodeName, []string{"existing-group-1", "existing-group-2", "new-group"})
 	}
 }
