@@ -37,6 +37,16 @@ type WatcherConfig struct {
 	Options map[string]interface{} `json:"options,omitempty"`
 }
 
+func (c WatcherConfig) ClientName() string {
+	if c.Options != nil {
+		if name, ok := c.Options["ClientName"].(string); ok && name != "" {
+			return name
+		}
+	}
+
+	return "watcher-factory"
+}
+
 // WatcherFactory creates change stream watchers for specific datastore providers
 type WatcherFactory interface {
 	CreateChangeStreamWatcher(
