@@ -53,7 +53,7 @@ func (f *MongoWatcherFactory) CreateChangeStreamWatcher(
 	watcher, err := mongoStore.CreateChangeStreamWatcher(ctx, config.ClientName(), mongoPipeline)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MongoDB change stream watcher: %w", err)
-	} 
+	}
 
 	return watcher, nil
 }
