@@ -17,6 +17,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/nvidia/nvsentinel/store-client/pkg/datastore"
@@ -43,6 +44,8 @@ func (c WatcherConfig) ClientName() string {
 			return name
 		}
 	}
+
+	slog.Warn("ClientName not set in WatcherConfig options, falling back to default", "fallback", "watcher-factory")
 
 	return "watcher-factory"
 }
