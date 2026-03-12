@@ -17,7 +17,6 @@ package watcher
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	"github.com/nvidia/nvsentinel/store-client/pkg/datastore"
@@ -34,20 +33,11 @@ type WatcherConfig struct {
 	// Resume token for continuing from a specific point
 	ResumeToken []byte `json:"resumeToken,omitempty"`
 
+	// Client name for logging and identification
+	ClientName string `json:"clientName"`
+
 	// Provider-specific options
 	Options map[string]interface{} `json:"options,omitempty"`
-}
-
-func (c WatcherConfig) ClientName() string {
-	if c.Options != nil {
-		if name, ok := c.Options["ClientName"].(string); ok && name != "" {
-			return name
-		}
-	}
-
-	slog.Warn("ClientName not set in WatcherConfig options, falling back to default", "fallback", "watcher-factory")
-
-	return "watcher-factory"
 }
 
 // WatcherFactory creates change stream watchers for specific datastore providers
@@ -80,6 +70,10 @@ func CreateChangeStreamWatcher(
 	ds datastore.DataStore,
 	config WatcherConfig,
 ) (datastore.ChangeStreamWatcher, error) {
+	if config.ClientName == "" {
+		return nil, fmt.Errorf("ClientName is required in WatcherConfig")
+	}
+
 	// Determine the provider from the datastore config
 	provider, err := getProviderFromDataStore(ds)
 	if err != nil {

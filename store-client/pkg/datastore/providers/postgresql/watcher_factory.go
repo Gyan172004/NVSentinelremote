@@ -42,7 +42,7 @@ func (f *PostgreSQLWatcherFactory) CreateChangeStreamWatcher(
 		return nil, fmt.Errorf("expected PostgreSQL datastore, got %T", ds)
 	}
 
-	clientName := config.ClientName()
+	clientName := config.ClientName
 	tableName := config.CollectionName
 
 	if tableName == "" {

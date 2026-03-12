@@ -165,9 +165,7 @@ func initDatastoreAndWatcher(
 	watcherConfig := watcher.WatcherConfig{
 		Pipeline:       pipeline,
 		CollectionName: "HealthEvents",
-		Options: map[string]interface{}{
-			"ClientName": "fault-remediation",
-		},
+		ClientName:     "fault-remediation",
 	}
 
 	watcherInstance, err := watcher.CreateChangeStreamWatcher(ctx, ds, watcherConfig)
